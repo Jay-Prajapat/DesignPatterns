@@ -1,0 +1,168 @@
+﻿using AutoMapper;
+using BusinessAccessLayer.AbstractFactory;
+using BusinessAccessLayer.Factory;
+using BusinessAccessLayer.Interface;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Practical23.Dto;
+using Practical23.Interface;
+using Practical23.Models;
+using System.Runtime.CompilerServices;
+
+namespace Practical23.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class EmployeeController : ControllerBase
+    {
+        private readonly IEmployeeRepository _employeeRepository;
+        private readonly IMapper _mapper;
+
+        public EmployeeController(IEmployeeRepository employeeRepository, IMapper mapper)
+        {
+            _employeeRepository = employeeRepository;
+            _mapper = mapper;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<EmployeeDto>>> GetEmployeesAsync()
+        {
+            var employees = await _employeeRepository.GetEmployeesAsync();
+            return Ok(_mapper.Map<IEnumerable<EmployeeDto>>(employees));
+        }
+
+        [HttpGet("{id:int}", Name = "GetEmployeeByIdAsync")]
+        public async Task<ActionResult<EmployeeDto>> GetEmployeeByIdAsync(int id)
+        {
+            var employee = await _employeeRepository.GetEmployeeByIdAsync(id);
+            if (employee == null)
+            {
+                return NotFound();
+            }
+            return Ok(_mapper.Map<EmployeeDto>(employee));
+        }
+
+        [HttpGet("{id:int}/hours/{hours:int}")]
+        public async Task<ActionResult<EmployeeDtoHourBonus>> GetBounsFromEmployeeId(int id, int hours)
+        {
+            var employee = await _employeeRepository.GetEmployeeByIdAsync(id);
+            if (employee == null)
+            {
+                return NotFound();
+            }
+            IDepartment? department = null;
+            switch (employee.DepartmentId)
+            {
+                case Department.IT:
+                    department = new ITFactory().CreateDepartment();
+                    break;
+                case Department.Admin:
+                    department = new AdminFactory().CreateDepartment();
+                    break;
+                case Department.Sales:
+                    department = new SalesFactory().CreateDepartment();
+                    break;
+                case Department.OnSite:
+                    department = new OnSiteFactory().CreateDepartment();
+                    break;
+                default:
+                    break;
+            }
+
+            var employeeHoursBouns = _mapper.Map<EmployeeDtoHourBonus>(employee);
+            employeeHoursBouns.Hours = hours;
+            if (department != null)
+            {
+                employeeHoursBouns.Bouns = department.CalculateOverTime(hours);
+            }
+            return Ok(employeeHoursBouns);
+        }
+
+        [HttpGet("{id:int}/abstract/hours/{hours:int}")]
+        public async Task<ActionResult<EmployeeDtoHourBonus>> GetBounsFromEmployeeIdUsingAbstract(int id, int hours)
+        {
+            var employee = await _employeeRepository.GetEmployeeByIdAsync(id);
+            if (employee == null) { return NotFound(); }
+
+            IndoorDepartmentFactory? indoorDepartmentFactory = null;
+            OutDoorDepartmentFactory? outdoorDepartmentFactory = null;
+            IDepartment? department = null;
+
+            switch(employee.DepartmentId)
+            {
+                case Department.IT:
+                    indoorDepartmentFactory = new ITAbstractFactory();
+                    department = indoorDepartmentFactory.CreateDepartment();
+                    break;
+                case Department.Admin:
+                    indoorDepartmentFactory = new AdminAbstractFactory();
+                    department = indoorDepartmentFactory.CreateDepartment();
+                    break;
+                case Department.Sales:
+                    outdoorDepartmentFactory = new SalesAbstractFactory();
+                    department = outdoorDepartmentFactory.CreateDepartment();
+                    break;
+                case Department.OnSite:
+                    outdoorDepartmentFactory = new OnSiteAbstractFactory();
+                    department = outdoorDepartmentFactory.CreateDepartment();
+                    break;
+                default:
+                    break;
+            }
+            var employeeHourBouns = _mapper.Map<EmployeeDtoHourBonus>(employee);
+            employeeHourBouns.Hours = hours;
+            if (department is not null)
+            {
+                employeeHourBouns.Bouns = department.CalculateOverTime(hours);
+            }
+            return Ok(employeeHourBouns);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> CreateEmployeeAsync(CreateEmployeeDto createEmployee)
+        {
+            if (!ModelState.IsValid)
+            {
+                var errors = string.Join(", ", ModelState.Values.SelectMany(x => x.Errors.Select(c => c.ErrorMessage)).ToList());
+                return UnprocessableEntity(ModelState);
+            }
+            var employee = _mapper.Map<Employee>(createEmployee);
+            await _employeeRepository.CreateEmployeeAsync(employee);
+            await _employeeRepository.SaveChangesAsync();
+            var createdEmployeeToReturn = _mapper.Map<EmployeeDto>(employee);
+
+            return CreatedAtRoute("GetEmployeeByIdAsync", new { id = createdEmployeeToReturn.Id }, createdEmployeeToReturn);
+        }
+        [HttpPut("{id:int}")]
+        public async Task<ActionResult<EmployeeDto>> UpdateEmployeeAsync(int id, UpdateEmployeeDto updateEmployee)
+        {
+            var employeeEntity = await _employeeRepository.GetEmployeeByIdAsync(id);
+            if (employeeEntity is null)
+            {
+                return NotFound();
+            }
+            if (!ModelState.IsValid)
+            {
+                var errors = string.Join(", ", ModelState.Values.SelectMany(x => x.Errors.Select(c => c.ErrorMessage)).ToList());
+                return UnprocessableEntity(ModelState);
+            }
+            _mapper.Map(updateEmployee, employeeEntity);
+
+            await _employeeRepository.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id:int}")]
+        public async Task<ActionResult<EmployeeDto>> DeleteEmployeeAsync(int id)
+        {
+            var employeeEntity = await _employeeRepository.GetEmployeeByIdAsync(id);
+            if (employeeEntity is null)
+            {
+                return NotFound();
+            }
+            await _employeeRepository.DeleteEmployeeAsync(employeeEntity);
+            await _employeeRepository.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+}
